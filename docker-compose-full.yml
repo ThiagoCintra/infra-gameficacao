@@ -1,0 +1,101 @@
+version: "3.8"
+
+# ⚠️  AVISO DE SEGURANÇA: As variáveis JWT_SECRET abaixo são valores padrão apenas para desenvolvimento local.
+# Em produção, utilize um arquivo .env separado ou um gerenciador de segredos e NUNCA commite segredos reais.
+# Para gerar uma chave segura: openssl rand -base64 32
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:6.0
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand({ping: 1})"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack
+    environment:
+      - SERVICES=sqs
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack/init:/etc/localstack/init/ready.d
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      retries: 10
+
+  login-service:
+    build: ./LoginService
+    container_name: login-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - JWT_SECRET=bXlTdXBlclNlY3JldEtleUZvckpXVFRva2VuR2VuZXJhdGlvbjEyMzQ1Njc4OTA=
+      - JWT_EXPIRATION=86400000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+  transaction-service:
+    build: ./TransactionService
+    container_name: transaction-service
+    ports:
+      - "8080:8080"
+    depends_on:
+      login-service:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - JWT_SECRET=bXlTdXBlclNlY3JldEtleUZvckpXVFRva2VuR2VuZXJhdGlvbjEyMzQ1Njc4OTA=
+      - JWT_EXPIRATION=86400000
+      - LOGIN_SERVICE_URL=http://login-service:8081
+      - LOGIN_SERVICE_TIMEOUT_MILLIS=2000
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/transactions.fifo
+
+  game-service:
+    build: ./GameService
+    container_name: game-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - SQS_QUEUE_URL=http://localstack:4566/000000000000/transactions.fifo
+      - SPRING_DATA_MONGODB_URI=mongodb://mongo:27017/game_db
+      - JWT_SECRET=bXlTdXBlclNlY3JldEtleUZvckpXVFRva2VuR2VuZXJhdGlvbjEyMzQ1Njc4OTA=
+      - JWT_EXPIRATION=86400000
+
+volumes:
+  mongo-data:
