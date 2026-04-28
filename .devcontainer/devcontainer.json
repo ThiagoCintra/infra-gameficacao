@@ -10,7 +10,7 @@
     },
     "ghcr.io/devcontainers/features/java:1": {
       "version": "21",
-      "jdkDistro": "temurin"
+      "jdkDistro": "ms"
     },
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.11"
@@ -19,8 +19,7 @@
       "version": "18"
     },
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/aws-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+    "ghcr.io/devcontainers/features/aws-cli:1": {}
   },
 
   "customizations": {
@@ -41,7 +40,7 @@
         "yzhang.markdown-all-in-one"
       ],
       "settings": {
-        "java.jdt.ls.java.home": "/usr/local/sdkman/candidates/java/current",
+        "java.jdt.ls.java.home": "/usr/local/microsoft-openjdk-21",
         "java.compile.nullAnalysis.mode": "automatic",
         "spring-boot.dashboard.enabled": true,
         "terminal.integrated.defaultProfile.linux": "bash",
@@ -54,7 +53,7 @@
   },
 
   "containerEnv": {
-    "JAVA_HOME": "/usr/local/sdkman/candidates/java/current",
+    "JAVA_HOME": "/usr/local/microsoft-openjdk-21",
     "MAVEN_HOME": "/usr/share/maven",
     "DOCKER_BUILDKIT": "1",
     "COMPOSE_DOCKER_CLI_BUILD": "1"
