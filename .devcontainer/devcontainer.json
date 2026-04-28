@@ -1,0 +1,124 @@
+{
+  "name": "Itaú - Sistema de Gamificação",
+  "description": "Ambiente de desenvolvimento para os microsserviços Login, Transaction e Game",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "jdkDistro": "ms"
+    },
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "18"
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-spring-boot-dashboard",
+        "vscjava.vscode-spring-initializr",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker",
+        "mongodb.mongodb-vscode",
+        "redhat.vscode-xml",
+        "vmware.vscode-boot-dev-pack",
+        "github.copilot",
+        "github.copilot-chat",
+        "eamodio.gitlens",
+        "ms-vscode.makefile-tools",
+        "yzhang.markdown-all-in-one"
+      ],
+      "settings": {
+        "java.jdt.ls.java.home": "/usr/local/microsoft-openjdk-21",
+        "java.compile.nullAnalysis.mode": "automatic",
+        "spring-boot.dashboard.enabled": true,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "git.autofetch": true,
+        "docker.dockerPath": "/usr/local/bin/docker",
+        "files.autoSave": "afterDelay",
+        "workbench.colorTheme": "Default Dark+"
+      }
+    }
+  },
+
+  "containerEnv": {
+    "JAVA_HOME": "/usr/local/microsoft-openjdk-21",
+    "MAVEN_HOME": "/usr/share/maven",
+    "DOCKER_BUILDKIT": "1",
+    "COMPOSE_DOCKER_CLI_BUILD": "1"
+  },
+
+  "portsAttributes": {
+    "8080": {
+      "label": "TransactionService",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "8081": {
+      "label": "LoginService",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "8082": {
+      "label": "GameService",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    },
+    "6379": {
+      "label": "Redis",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    },
+    "27017": {
+      "label": "MongoDB",
+      "onAutoForward": "notify",
+      "visibility": "private"
+    },
+    "4566": {
+      "label": "LocalStack SQS",
+      "onAutoForward": "notify",
+      "visibility": "public"
+    }
+  },
+
+  "forwardPorts": [8080, 8081, 8082, 6379, 27017, 4566],
+
+  "onCreateCommand": "echo '📦 Criando estrutura de diretórios...' && mkdir -p /workspace/localstack/init",
+
+  "updateContentCommand": "echo '🚀 Atualizando conteúdo...'",
+
+  "postCreateCommand": "bash << 'EOF'\n#!/bin/bash\nset -e\n\necho \"==========================================\"\necho \"🚀 Iniciando setup do ambiente Itaú\"\necho \"==========================================\"\n\n# Instalar ferramentas adicionais\necho \"📦 Instalando ferramentas...\"\napt-get update && apt-get install -y jq uuid-runtime curl wget\n\n# Instalar artillery\necho \"📊 Instalando Artillery para testes de stress...\"\nnpm install -g artillery\n\n# Instalar reportlab para PDF\necho \"📄 Instalando ReportLab para geração de PDF...\"\npip install reportlab\n\n# Instalar Docker Compose (se necessário)\necho \"🐳 Configurando Docker Compose...\"\ncurl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)\" -o /usr/local/bin/docker-compose\nchmod +x /usr/local/bin/docker-compose\n\n# Dar permissão para o script de setup\nif [ -f \"setup-codespace.sh\" ]; then\n    chmod +x setup-codespace.sh\n    echo \"✅ Setup script preparado\"\nfi\n\necho \"==========================================\"\necho \"✅ Setup concluído!\"\necho \"==========================================\"\necho \"\"\necho \"🚀 Executando setup-codespace.sh...\"\necho \"==========================================\"\n\n# Executar automaticamente o setup-codespace.sh\nif [ -f \"./setup-codespace.sh\" ]; then\n    ./setup-codespace.sh\nelse\n    echo \"❌ Arquivo setup-codespace.sh não encontrado!\"\n    echo \"Certifique-se de que o arquivo está no diretório raiz.\"\n    exit 1\nfi\n\necho \"==========================================\"\necho \"✅ Ambiente 100% pronto!\"\necho \"==========================================\"\necho \"\"\necho \"📊 Relatório gerado: Relatorio.pdf\"\necho \"🔓 Portas liberadas:\"\necho \"  - LoginService: http://localhost:8081\"\necho \"  - TransactionService: http://localhost:8080\"\necho \"  - GameService: http://localhost:8082\"\necho \"  - Redis: localhost:6379\"\necho \"  - MongoDB: localhost:27017\"\necho \"  - LocalStack: http://localhost:4566\"\necho \"\"\necho \"📚 Documentação disponível em:\"\necho \"  - README.md\"\necho \"  - 01-ARQUITETURA.md até 10-TESTES.md\"\necho \"\"\necho \"🎯 Para reexecutar os testes manualmente:\"\necho \"  - Teste E2E: ./e2e-test.sh\"\necho \"  - Teste Stress: artillery run stress-test.yml\"\necho \"  - Teste ETH: ./eth-test.sh\"\necho \"  - Teste Chaos: ./caos-test.sh\"\necho \"  - Gerar relatório: python3 gerar-relatorio.py\"\necho \"\"\nEOF\n",
+
+  "postStartCommand": "echo '✅ Ambiente pronto! Todos os serviços estão rodando.'",
+
+  "postAttachCommand": "echo '🔗 Conectado ao Codespace. Sistema em execução!'",
+
+  "remoteUser": "vscode",
+
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  "shutdownAction": "stopContainer",
+  
+  "workspaceFolder": "/workspaces/infra-gameficacao",
+  
+  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/workspaces/infra-gameficacao"
+}
