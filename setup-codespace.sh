@@ -157,6 +157,8 @@ start_docker_compose() {
     docker-compose up -d --build 2>&1 | tail -20
   fi
 
+  # Aguarda 30s para que os containers com healthcheck (Redis, Mongo, LocalStack)
+  # completem seus start_period e as JVMs do Spring Boot terminem de inicializar.
   log "Aguardando inicialização dos serviços (30s)..."
   sleep 30
 
@@ -251,6 +253,8 @@ scenarios:
       - post:
           url: "/transactions"
           headers:
+            # {{ $randomString() }} é a sintaxe de template do Artillery para gerar
+            # uma string aleatória em cada requisição, garantindo chaves únicas por request.
             X-Idempotency-Key: "{{ \$randomString() }}"
           json:
             type: "DEPOSITO"
@@ -369,6 +373,7 @@ run_e2e_test() {
 
   # ---- POST /transactions ----
   log "Testando POST /transactions..."
+  # Cadeia de fallback para UUID: python3 (uuid4) → /proc/sys/kernel/random/uuid → timestamp
   local idempotency_key
   idempotency_key=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || \
                     cat /proc/sys/kernel/random/uuid 2>/dev/null || date +%s%N)
@@ -498,19 +503,21 @@ run_eth_test() {
       ((ETH_PASS++))
       break
     fi
-    sleep 0.2
+    sleep 0.2  # Pequena pausa entre tentativas para não sobrecarregar o serviço durante o teste
   done
-  if [ "$brute_blocked" = false ]; then
-    warn "Sem proteção detectada contra força bruta (HTTP $last_code após 15 tentativas)"
-    report "- ⚠️  **SEM PROTEÇÃO** detectada contra força bruta após 15 tentativas (HTTP $last_code)"
-    ((ETH_VULN++))
-  fi
+    if [[ "$brute_blocked" = false ]]; then
+      warn "Sem proteção detectada contra força bruta (HTTP $last_code após 15 tentativas)"
+      report "- ⚠️  **SEM PROTEÇÃO** detectada contra força bruta após 15 tentativas (HTTP $last_code)"
+      ((ETH_VULN++))
+    fi
 
   # ---- Headers de Segurança ----
   log "Verificando headers de segurança HTTP..."
   report ""
   report "### Headers de Segurança HTTP"
   report ""
+  # Tenta o endpoint versionado (/api/v1/actuator/health) do LoginService primeiro,
+  # com fallback para o endpoint padrão do Spring Boot Actuator (/actuator/health).
   local headers
   headers=$(curl -sI "$BASE_LOGIN/api/v1/actuator/health" 2>/dev/null || \
             curl -sI "$BASE_LOGIN/actuator/health" 2>/dev/null || echo "")
@@ -583,6 +590,8 @@ run_chaos_monkey() {
   report "### Latência de Rede Simulada (tc)"
   report ""
   log "Chaos: simulando latência de rede no transaction-service..."
+  # Simula 500ms de latência de rede — valor suficiente para impactar SLAs
+  # sem causar timeout imediato nos clientes (limite padrão costuma ser ≥1s).
   if docker exec transaction-service tc qdisc add dev eth0 root netem delay 500ms 2>/dev/null; then
     sleep 3
     local latency_code latency_time
@@ -603,6 +612,8 @@ run_chaos_monkey() {
   report "### Stress de CPU"
   report ""
   log "Chaos: estressando CPU do transaction-service por 15s..."
+  # stress: --cpu 2 estressa 2 núcleos de CPU, --timeout 15 limita a 15 segundos.
+  # Fallback: dd lê /dev/zero em loop (blocos de 1M) para saturar CPU sem o pacote stress.
   if docker exec -d transaction-service sh -c "nohup stress --cpu 2 --timeout 15 &" 2>/dev/null || \
      docker exec -d transaction-service sh -c "dd if=/dev/zero of=/dev/null bs=1M count=10000 &" 2>/dev/null; then
     sleep 5
@@ -804,17 +815,20 @@ FOOTER
     fi
   fi
 
-  # Tentativa 2: pandoc direto para PDF (requer LaTeX)
+  # Tentativa 2: pandoc direto para PDF (requer LaTeX/xelatex)
   if [ "$pdf_generated" = false ] && command -v pandoc &>/dev/null; then
     log "Gerando PDF com pandoc..."
-    pandoc "$tmp_md" \
-      -o "$PDF_FILE" \
-      --pdf-engine=xelatex \
-      -V geometry:margin=2cm \
-      -V lang=pt-BR \
-      2>/dev/null && pdf_generated=true || true
+    # xelatex só é tentado se estiver instalado (requer texlive-xetex ou similar)
+    if command -v xelatex &>/dev/null; then
+      pandoc "$tmp_md" \
+        -o "$PDF_FILE" \
+        --pdf-engine=xelatex \
+        -V geometry:margin=2cm \
+        -V lang=pt-BR \
+        2>/dev/null && pdf_generated=true || true
+    fi
 
-    # Tentativa pandoc sem LaTeX (via weasypdf/weasyprint)
+    # Tentativa pandoc sem motor específico (usa pdflatex se disponível, caso contrário falha graciosamente)
     if [ "$pdf_generated" = false ]; then
       pandoc "$tmp_md" -o "$PDF_FILE" 2>/dev/null && pdf_generated=true || true
     fi
@@ -912,41 +926,52 @@ update_readme() {
   today=$(date '+%d/%m/%Y')
 
   # Verificar se seção já existe para não duplicar
+  if [ ! -f "$readme" ]; then
+    warn "README.md não encontrado em $readme — criando arquivo vazio"
+    touch "$readme"
+  fi
+
   if grep -q "## 🧪 Relatórios de Teste" "$readme" 2>/dev/null; then
     log "Seção de relatórios já existe no README — removendo para atualizar..."
-    # Remover desde a seção até o próximo "---" ou "## "
-    python3 - <<PYEOF
-import re
-with open('$readme', 'r') as f:
-    content = f.read()
-
-# Remove tudo de "## 🧪 Relatórios de Teste" até o próximo "## " de nível 2 ou EOF
-content = re.sub(
-    r'\n## 🧪 Relatórios de Teste.*?(?=\n## |\Z)',
-    '',
-    content,
-    flags=re.DOTALL
-)
-with open('$readme', 'w') as f:
-    f.write(content)
+    # Remover desde a seção até o próximo "## " de nível 2 ou EOF
+    python3 - <<PYEOF || warn "Falha ao remover seção de relatórios do README"
+import re, sys
+try:
+    with open('$readme', 'r', encoding='utf-8') as f:
+        content = f.read()
+    content = re.sub(
+        r'\n## 🧪 Relatórios de Teste.*?(?=\n## |\Z)',
+        '',
+        content,
+        flags=re.DOTALL
+    )
+    with open('$readme', 'w', encoding='utf-8') as f:
+        f.write(content)
+except Exception as e:
+    sys.stderr.write(f"Erro: {e}\n")
+    sys.exit(1)
 PYEOF
   fi
 
   # Verificar se seção de portas já existe
   if grep -q "## 🌐 Portas Liberadas" "$readme" 2>/dev/null; then
     log "Seção de portas já existe no README — removendo para atualizar..."
-    python3 - <<PYEOF
-import re
-with open('$readme', 'r') as f:
-    content = f.read()
-content = re.sub(
-    r'\n## 🌐 Portas Liberadas.*?(?=\n## |\Z)',
-    '',
-    content,
-    flags=re.DOTALL
-)
-with open('$readme', 'w') as f:
-    f.write(content)
+    python3 - <<PYEOF || warn "Falha ao remover seção de portas do README"
+import re, sys
+try:
+    with open('$readme', 'r', encoding='utf-8') as f:
+        content = f.read()
+    content = re.sub(
+        r'\n## 🌐 Portas Liberadas.*?(?=\n## |\Z)',
+        '',
+        content,
+        flags=re.DOTALL
+    )
+    with open('$readme', 'w', encoding='utf-8') as f:
+        f.write(content)
+except Exception as e:
+    sys.stderr.write(f"Erro: {e}\n")
+    sys.exit(1)
 PYEOF
   fi
 
